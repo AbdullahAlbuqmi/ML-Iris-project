@@ -1,0 +1,224 @@
+# Import necessary libraries for data handling, visualization, and modeling
+from sklearn.datasets import load_iris
+import pandas as pd
+import matplotlib.pyplot as plt
+import seaborn as sns
+from sklearn.cluster import KMeans
+
+# ------------------------------
+# Load and prepare the dataset
+# ------------------------------
+# Load Iris dataset from sklearn
+data = load_iris()
+
+# Convert to a DataFrame and name columns using feature names
+df = pd.DataFrame(data.data, columns=data.feature_names)
+
+# Add species names as a categorical column
+df['species'] = pd.Categorical.from_codes(data.target, data.target_names)
+
+# Check for missing values, basic data overview, and statistics
+print("Missing values in each column:")
+print(df.isnull().sum())
+print("First 5 rows of the dataset:")
+print(df.head())
+print("Descriptive statistics:")
+print(df.describe())
+print("Class distribution:")
+print(df['species'].value_counts())
+
+# ------------------------------
+# Exploratory Data Analysis (EDA)
+# ------------------------------
+# Set seaborn visual theme
+sns.set(style="whitegrid")
+
+# Pairplot to visualize feature distributions and relationships
+sns.pairplot(df, hue='species')
+plt.suptitle("Pairwise Feature Relationships by Species", y=1.02)
+
+# Heatmap of feature correlations
+plt.figure(figsize=(8,6))
+sns.heatmap(df.iloc[:, :4].corr(), annot=True, cmap='coolwarm')
+plt.title("Feature Correlation Heatmap")
+plt.tight_layout()
+
+# Plot histograms for each feature
+features = df.columns[:-1]
+plt.figure(figsize=(12, 10))
+for i, feature in enumerate(features):
+    plt.subplot(2, 2, i + 1)
+    sns.histplot(df[feature], kde=True, color='skyblue', bins=20)
+    plt.xlabel(feature)
+    plt.ylabel("Frequency")
+    plt.title(f"Histogram of {feature}")
+plt.tight_layout()
+plt.suptitle("Histogram of Each Feature", fontsize=16, y=1.02)
+
+# ------------------------------
+# Unsupervised Learning
+# ------------------------------
+# K-Means clustering with 3 clusters (expected species)
+X = df.drop('species', axis=1)
+kmeans = KMeans(n_clusters=3, random_state=42)
+clusters = kmeans.fit_predict(X)
+df['cluster'] = clusters
+
+# Visualize K-Means cluster assignments
+sns.pairplot(df, hue='cluster', palette='Set2')
+plt.suptitle("K-Means Clusters Visualization", y=1.02)
+
+# Outlier detection with Isolation Forest
+from sklearn.ensemble import IsolationForest
+iso = IsolationForest(contamination=0.05, random_state=42)
+df['outlier_iso'] = iso.fit_predict(X)
+
+# Outlier detection with DBSCAN clustering
+from sklearn.cluster import DBSCAN
+from sklearn.preprocessing import StandardScaler
+X_scaled = StandardScaler().fit_transform(X)
+dbscan = DBSCAN(eps=0.6, min_samples=5)
+df['outlier_dbscan'] = dbscan.fit_predict(X_scaled)
+
+# Reduce dimensionality for visualization using PCA
+from sklearn.decomposition import PCA
+pca = PCA(n_components=2)
+X_pca = pca.fit_transform(X)
+pca_df = pd.DataFrame(X_pca, columns=['PC1', 'PC2'])
+pca_df['outlier_iso'] = df['outlier_iso']
+pca_df['outlier_dbscan'] = df['outlier_dbscan']
+
+# Plot Isolation Forest and DBSCAN outliers
+plt.figure(figsize=(10, 4))
+plt.subplot(1, 2, 1)
+sns.scatterplot(x='PC1', y='PC2', hue='outlier_iso', data=pca_df, palette={1:'blue', -1:'red'})
+plt.title('Isolation Forest Outlier Detection')
+
+plt.subplot(1, 2, 2)
+sns.scatterplot(x='PC1', y='PC2', hue='outlier_dbscan', data=pca_df, palette='Set2')
+plt.title('DBSCAN Clustering (Outliers = -1)')
+plt.tight_layout()
+
+# Confusion matrix between actual species and predicted clusters
+from sklearn.metrics import confusion_matrix
+cm = confusion_matrix(df['species'], df['cluster'], labels=['setosa', 'versicolor', 'virginica'])
+plt.figure(figsize=(6,4))
+sns.heatmap(cm, annot=True, fmt='d', cmap='Blues',
+            xticklabels=['Cluster 0', 'Cluster 1', 'Cluster 2'],
+            yticklabels=['setosa', 'versicolor', 'virginica'])
+plt.xlabel("Predicted Cluster")
+plt.ylabel("True Species")
+plt.title("K-Means Clustering Confusion Matrix")
+plt.show()
+
+# Evaluate cluster cohesion with Silhouette Score
+from sklearn.metrics import silhouette_score
+score = silhouette_score(X, df['cluster'])
+print(f"Silhouette Score for K-Means Clustering: {score:.3f}")
+
+# ------------------------------
+# Supervised Learning: Baseline Model
+# ------------------------------
+# Prepare data for classification
+from sklearn.model_selection import train_test_split
+from sklearn.linear_model import LogisticRegression
+from sklearn.metrics import accuracy_score, classification_report
+
+X = df.drop(['species', 'cluster', 'outlier_iso', 'outlier_dbscan'], axis=1)
+y = df['species']
+
+# Split dataset into training and testing (80/20)
+X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42, stratify=y)
+
+# Train logistic regression baseline model
+model = LogisticRegression(max_iter=200)
+model.fit(X_train, y_train)
+y_pred = model.predict(X_test)
+
+# Print accuracy and classification report
+accuracy = accuracy_score(y_test, y_pred)
+print(f"Baseline Accuracy: {accuracy:.2f}")
+print("\nClassification Report:\n")
+print(classification_report(y_test, y_pred))
+
+# Plot confusion matrix
+cm = confusion_matrix(y_test, y_pred, labels=model.classes_)
+plt.figure(figsize=(6, 4))
+sns.heatmap(cm, annot=True, fmt='d', cmap='Greens',
+            xticklabels=model.classes_,
+            yticklabels=model.classes_)
+plt.xlabel('Predicted')
+plt.ylabel('Actual')
+plt.title('Confusion Matrix - Logistic Regression')
+plt.show()
+
+# ------------------------------
+# Model Comparison with Cross-Validation
+# ------------------------------
+from sklearn.model_selection import cross_val_score
+from sklearn.svm import SVC
+from sklearn.tree import DecisionTreeClassifier
+from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier
+
+# Define several models for comparison
+models = {
+    'SVM': SVC(),
+    'Decision Tree': DecisionTreeClassifier(),
+    'Random Forest': RandomForestClassifier(),
+    'Gradient Boosting': GradientBoostingClassifier()
+}
+
+# Evaluate each model using 10-fold cross-validation
+print("\nModel Comparison (10-fold Cross-Validation):")
+for name, clf in models.items():
+    scores = cross_val_score(clf, X, y, cv=10, scoring='accuracy')
+    print(f"{name}: Mean Accuracy = {scores.mean():.4f}, Std = {scores.std():.4f}")
+
+# ------------------------------
+# Model Tuning (GridSearch) on Best Model
+# ------------------------------
+from sklearn.model_selection import GridSearchCV
+
+# Define grid of hyperparameters for Random Forest
+param_grid = {
+    'n_estimators': [50, 100, 150],
+    'max_depth': [2, 4, 6],
+    'min_samples_split': [2, 5]
+}
+
+# Perform grid search with cross-validation
+grid_search = GridSearchCV(RandomForestClassifier(random_state=42), param_grid, cv=5, scoring='accuracy')
+grid_search.fit(X_train, y_train)
+
+print("\nBest Parameters from Grid Search:")
+print(grid_search.best_params_)
+
+# Evaluate the best model
+best_rf = grid_search.best_estimator_
+y_pred_tuned = best_rf.predict(X_test)
+print("\nTuned Model Accuracy:", accuracy_score(y_test, y_pred_tuned))
+print("\nTuned Model Classification Report:\n", classification_report(y_test, y_pred_tuned))
+
+# ------------------------------
+# Ensemble Model (Voting)
+# ------------------------------
+from sklearn.ensemble import VotingClassifier
+
+# Define individual classifiers for the ensemble
+svm = SVC(probability=True)
+rf = RandomForestClassifier(**grid_search.best_params_, random_state=42)
+gb = GradientBoostingClassifier()
+
+# Combine classifiers using soft voting
+voting_clf = VotingClassifier(estimators=[
+    ('svm', svm),
+    ('rf', rf),
+    ('gb', gb)
+], voting='soft')
+
+# Train and evaluate the ensemble model
+voting_clf.fit(X_train, y_train)
+y_pred_ensemble = voting_clf.predict(X_test)
+
+print("\nEnsemble Model Accuracy:", accuracy_score(y_test, y_pred_ensemble))
+print("\nEnsemble Model Classification Report:\n", classification_report(y_test, y_pred_ensemble))
